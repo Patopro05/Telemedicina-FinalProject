@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Telemedicina · Monitoreo Clínico ESP32</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    :root {
+      --bg: #f8fafc;
+      --card-bg: #ffffff;
+      --text-main: #0f172a;
+      --text-muted: #64748b;
+      --border: #e2e8f0;
+      --border-focus: #cbd5e1;
+      
+      --status-ok: #059669;
+      --status-ok-bg: #ecfdf5;
+      --status-warn: #d97706;
+      --status-warn-bg: #fffbeb;
+      --status-alert: #dc2626;
+      --status-alert-bg: #fef2f2;
+      
+      --color-temp: #0284c7;
+      --color-bpm: #059669;
+      --color-spo2: #7c3aed;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      background-color: var(--bg);
+      color: var(--text-main);
+      padding: 24px 16px;
+      line-height: 1.5;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .container {
+      max-width: 1040px;
+      margin: 0 auto;
+    }
+
+    /* Top Bar */
+    header {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      padding-bottom: 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+    }
+
+    .brand h1 {
+      font-size: 20px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-main);
+    }
+
+    .brand p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 2px;
+    }
+
+    .header-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .live-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      font-size: 12px;
+      font-weight: 500;
+      padding: 5px 12px;
+      border-radius: 9999px;
+      background: var(--status-ok-bg);
+      color: var(--status-ok);
+      border: 1px solid rgba(5, 150, 105, 0.2);
+    }
+
+    .live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: currentColor;
+      box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.5);
+      animation: pulse-ring 2s infinite cubic-bezier(0.4, 0, 0.6, 1);
+    }
+
+    @keyframes pulse-ring {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(5, 150, 105, 0.7); }
+      70% { transform: scale(1); box-shadow: 0 0 0 6px rgba(5, 150, 105, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(5, 150, 105, 0); }
+    }
+
+    .btn-csv {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-main);
+      background: #ffffff;
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 6px;
+      text-decoration: none;
+      cursor: pointer;
+      transition: background 0.15s ease, border-color 0.15s ease;
+    }
+
+    .btn-csv:hover {
+      background: #f1f5f9;
+      border-color: var(--border-focus);
+    }
+
+    /* Grid of Vitals */
+    .vitals-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+
+    .vital-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 22px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      min-height: 160px;
+      transition: border-color 0.15s ease;
+    }
+
+    .vital-card:hover {
+      border-color: var(--border-focus);
+    }
+
+    .vital-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+    }
+
+    .vital-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .vital-sensor-tag {
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: 'JetBrains Mono', monospace;
+      background: #f1f5f9;
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .vital-body {
+      margin: 14px 0;
+      display: flex;
+      align-items: baseline;
+      gap: 8px;
+    }
+
+    .vital-value {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 44px;
+      font-weight: 700;
+      line-height: 1;
+      letter-spacing: -0.04em;
+      color: var(--text-main);
+    }
+
+    .vital-unit {
+      font-size: 16px;
+      font-weight: 500;
+      color: var(--text-muted);
+    }
+
+    .vital-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .status-badge {
+      font-size: 12px;
+      font-weight: 500;
+      padding: 3px 10px;
+      border-radius: 6px;
+      display: inline-block;
+      background: #f1f5f9;
+      color: var(--text-muted);
+    }
+
+    .badge-ok {
+      background: var(--status-ok-bg);
+      color: var(--status-ok);
+      border: 1px solid rgba(5, 150, 105, 0.2);
+    }
+
+    .badge-warn {
+      background: var(--status-warn-bg);
+      color: var(--status-warn);
+      border: 1px solid rgba(217, 119, 6, 0.2);
+    }
+
+    .badge-alert {
+      background: var(--status-alert-bg);
+      color: var(--status-alert);
+      border: 1px solid rgba(220, 38, 38, 0.2);
+    }
+
+    .reference-range {
+      font-size: 11px;
+      color: var(--text-muted);
+    }
+
+    /* Telemetry Chart Section */
+    .section-card {
+      background: var(--card-bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px 22px;
+      margin-bottom: 24px;
+    }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 16px;
+    }
+
+    .section-title {
+      font-size: 14px;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+
+    .section-subtitle {
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .chart-container {
+      position: relative;
+      height: 240px;
+      width: 100%;
+    }
+
+    /* Recent Data Table */
+    .table-container {
+      overflow-x: auto;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+      text-align: left;
+    }
+
+    th {
+      font-weight: 600;
+      color: var(--text-muted);
+      border-bottom: 1px solid var(--border);
+      padding: 8px 12px;
+      text-transform: uppercase;
+      font-size: 11px;
+      letter-spacing: 0.04em;
+    }
+
+    td {
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--border);
+      color: var(--text-main);
+      font-family: 'JetBrains Mono', monospace;
+    }
+
+    tr:last-child td {
+      border-bottom: none;
+    }
+
+    tr:hover td {
+      background-color: #f8fafc;
+    }
+
+    /* Footer Meta */
+    footer {
+      margin-top: 32px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      align-items: center;
+      gap: 12px;
+      font-size: 12px;
+      color: var(--text-muted);
+    }
+
+    .footer-team {
+      line-height: 1.6;
+    }
+
+    .sync-text {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    
+    <!-- Header -->
+    <header>
+      <div class="brand">
+        <h1>Monitoreo Clínico Telemétrico</h1>
+        <p>Telemedicina · Sistema Inalámbrico de Signos Vitales (ESP32)</p>
+      </div>
+      <div class="header-actions">
+        <div class="live-indicator" id="connIndicator">
+          <span class="live-dot" id="connDot"></span>
+          <span id="connLabel">En espera</span>
+        </div>
+        <a href="/descargar-csv" class="btn-csv" title="Descargar registro histórico en formato CSV">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+            <polyline points="7 10 12 15 17 10"></polyline>
+            <line x1="12" y1="15" x2="12" y2="3"></line>
+          </svg>
+          Exportar CSV
+        </a>
+      </div>
+    </header>
+
+    <!-- 3 Core Vital Signs Cards -->
+    <section class="vitals-grid">
+      
+      <!-- Temperatura Corporal -->
+      <div class="vital-card">
+        <div class="vital-header">
+          <span class="vital-title">Temperatura</span>
+          <span class="vital-sensor-tag">MAX30205 (0x48)</span>
+        </div>
+        <div class="vital-body">
+          <span class="vital-value" id="valTemp">--.-</span>
+          <span class="vital-unit">°C</span>
+        </div>
+        <div class="vital-footer">
+          <span class="status-badge" id="badgeTemp">Sin lectura</span>
+          <span class="reference-range">Normal: 35.0 - 37.5 °C</span>
+        </div>
+      </div>
+
+      <!-- Frecuencia Cardíaca -->
+      <div class="vital-card">
+        <div class="vital-header">
+          <span class="vital-title">Frecuencia Cardíaca</span>
+          <span class="vital-sensor-tag">MAX30102 (0x57)</span>
+        </div>
+        <div class="vital-body">
+          <span class="vital-value" id="valBpm">--</span>
+          <span class="vital-unit">BPM</span>
+        </div>
+        <div class="vital-footer">
+          <span class="status-badge" id="badgeBpm">Sin lectura</span>
+          <span class="reference-range">Normal: 60 - 100 BPM</span>
+        </div>
+      </div>
+
+      <!-- Saturación de Oxígeno -->
+      <div class="vital-card">
+        <div class="vital-header">
+          <span class="vital-title">Oxígeno en Sangre</span>
+          <span class="vital-sensor-tag">SpO₂</span>
+        </div>
+        <div class="vital-body">
+          <span class="vital-value" id="valSpo2">--.-</span>
+          <span class="vital-unit">%</span>
+        </div>
+        <div class="vital-footer">
+          <span class="status-badge" id="badgeSpo2">Sin lectura</span>
+          <span class="reference-range">Normal: ≥ 95.0 %</span>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Realtime Trends Chart -->
+    <section class="section-card">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Evolución Temporal de Variables Fisiológicas</h2>
+          <p class="section-subtitle">Últimas 25 transmisiones telemétricas recibidas vía Wi-Fi</p>
+        </div>
+      </div>
+      <div class="chart-container">
+        <canvas id="telemetryChart"></canvas>
+      </div>
+    </section>
+
+    <!-- Recent Measurements Table -->
+    <section class="section-card">
+      <div class="section-header">
+        <div>
+          <h2 class="section-title">Registro Reciente en Servidor</h2>
+          <p class="section-subtitle">Trazabilidad de datos persistidos en mediciones.csv</p>
+        </div>
+      </div>
+      <div class="table-container">
+        <table>
+          <thead>
+            <tr>
+              <th>Hora</th>
+              <th>Temperatura (°C)</th>
+              <th>Frecuencia (BPM)</th>
+              <th>SpO₂ (%)</th>
+              <th>Estado Clínico</th>
+            </tr>
+          </thead>
+          <tbody id="historyTableBody">
+            <tr><td colspan="5" style="text-align: center; color: var(--text-muted);">Cargando historial...</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+      <div class="footer-team">
+        <strong>Telemedicina · Actividad 4</strong> · Prof. M.C. Gerardo Adrián De La Rosa Hernández<br>
+        Equipo: Fernando Gutiérrez (2010356) · Carlos Saucedo · Mariangeles Rodriguez · Jared Gutiérrez · Amanda Bustos
+      </div>
+      <div class="sync-text" id="syncStatus">
+        Última sync: --:--:--
+      </div>
+    </footer>
+
+  </div>
+
+  <script>
+    // Initialize Chart.js
+    const ctx = document.getElementById('telemetryChart').getContext('2d');
+    const telemetryChart = new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: [],
+        datasets: [
+          {
+            label: 'Temperatura (°C)',
+            data: [],
+            borderColor: '#0284c7',
+            backgroundColor: 'rgba(2, 132, 199, 0.05)',
+            borderWidth: 2,
+            tension: 0.25,
+            yAxisID: 'yTemp',
+            pointRadius: 2
+          },
+          {
+            label: 'BPM',
+            data: [],
+            borderColor: '#059669',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            tension: 0.25,
+            yAxisID: 'yBpm',
+            pointRadius: 2
+          },
+          {
+            label: 'SpO₂ (%)',
+            data: [],
+            borderColor: '#7c3aed',
+            backgroundColor: 'transparent',
+            borderWidth: 2,
+            tension: 0.25,
+            yAxisID: 'ySpo2',
+            pointRadius: 2
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        maintainAspectRatio: false,
+        animation: { duration: 300 },
+        interaction: { mode: 'index', intersect: false },
+        plugins: {
+          legend: {
+            position: 'top',
+            labels: { font: { size: 11, family: 'Inter' }, boxWidth: 12, usePointStyle: true }
+          },
+          tooltip: {
+            titleFont: { family: 'JetBrains Mono', size: 11 },
+            bodyFont: { family: 'Inter', size: 11 }
+          }
+        },
+        scales: {
+          x: {
+            grid: { display: false },
+            ticks: { font: { size: 10, family: 'JetBrains Mono' }, maxRotation: 0 }
+          },
+          yTemp: {
+            type: 'linear',
+            position: 'left',
+            min: 30,
+            max: 42,
+            grid: { color: '#f1f5f9' },
+            ticks: { font: { size: 10, family: 'JetBrains Mono' }, stepSize: 2 }
+          },
+          yBpm: {
+            type: 'linear',
+            position: 'right',
+            min: 40,
+            max: 140,
+            grid: { display: false },
+            ticks: { font: { size: 10, family: 'JetBrains Mono' } }
+          },
+          ySpo2: {
+            type: 'linear',
+            position: 'right',
+            min: 85,
+            max: 100,
+            grid: { display: false },
+            ticks: { display: false }
+          }
+        }
+      }
+    });
+
+    function setBadge(elemId, text, status) {
+      const el = document.getElementById(elemId);
+      el.textContent = text;
+      el.className = 'status-badge';
+      if (status === 'ok') el.classList.add('badge-ok');
+      else if (status === 'warn') el.classList.add('badge-warn');
+      else if (status === 'alert') el.classList.add('badge-alert');
+    }
+
+    async function actualizarTelemetria() {
+      try {
+        const res = await fetch('/api/datos', { cache: 'no-store' });
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+
+        // Update Values
+        document.getElementById('valTemp').textContent = data.temperatura !== null ? Number(data.temperatura).toFixed(1) : '--.-';
+        document.getElementById('valBpm').textContent = data.bpm !== null ? Math.round(data.bpm) : '--';
+        document.getElementById('valSpo2').textContent = data.spo2 !== null ? Number(data.spo2).toFixed(1) : '--.-';
+
+        // Update Badges
+        if (data.temperatura !== null) {
+          const t = Number(data.temperatura);
+          if (t >= 35.0 && t <= 37.5) setBadge('badgeTemp', 'Normotermia', 'ok');
+          else if (t > 37.5 && t <= 38.3) setBadge('badgeTemp', 'Febrícula', 'warn');
+          else if (t > 38.3) setBadge('badgeTemp', 'Fiebre', 'alert');
+          else setBadge('badgeTemp', 'Hipotermia', 'warn');
+        } else {
+          setBadge('badgeTemp', 'Sin señal', '');
+        }
+
+        if (data.bpm !== null) {
+          const b = Number(data.bpm);
+          if (b >= 60 && b <= 100) setBadge('badgeBpm', 'Ritmo Normal', 'ok');
+          else if (b < 60) setBadge('badgeBpm', 'Bradicardia', 'warn');
+          else setBadge('badgeBpm', 'Taquicardia', 'warn');
+        } else {
+          setBadge('badgeBpm', 'Sin señal', '');
+        }
+
+        if (data.spo2 !== null) {
+          const s = Number(data.spo2);
+          if (s >= 95.0) setBadge('badgeSpo2', 'Normoxemia', 'ok');
+          else if (s >= 90.0) setBadge('badgeSpo2', 'Hipoxia Leve', 'warn');
+          else setBadge('badgeSpo2', 'Hipoxia Severa', 'alert');
+        } else {
+          setBadge('badgeSpo2', 'Sin señal', '');
+        }
+
+        // Live connection indicator
+        const connLabel = document.getElementById('connLabel');
+        const connDot = document.getElementById('connDot');
+        if (data.actualizado) {
+          connLabel.textContent = 'En vivo';
+          connDot.style.background = 'var(--status-ok)';
+          document.getElementById('syncStatus').textContent = 'Última transmisión: ' + data.actualizado;
+        } else {
+          connLabel.textContent = 'Esperando ESP32';
+          connDot.style.background = 'var(--text-muted)';
+        }
+
+      } catch (err) {
+        document.getElementById('connLabel').textContent = 'Servidor desconectado';
+        document.getElementById('connDot').style.background = 'var(--status-alert)';
+      }
+    }
+
+    async function actualizarHistorial() {
+      try {
+        const res = await fetch('/api/historial', { cache: 'no-store' });
+        if (!res.ok) return;
+        const historial = await res.json();
+        if (!Array.isArray(historial) || historial.length === 0) return;
+
+        // Chart Update
+        const labels = historial.map(d => d.hora || '');
+        const temps = historial.map(d => d.temperatura);
+        const bpms = historial.map(d => d.bpm);
+        const spo2s = historial.map(d => d.spo2);
+
+        telemetryChart.data.labels = labels;
+        telemetryChart.data.datasets[0].data = temps;
+        telemetryChart.data.datasets[1].data = bpms;
+        telemetryChart.data.datasets[2].data = spo2s;
+        telemetryChart.update();
+
+        // Table Update (Last 6 records)
+        const tbody = document.getElementById('historyTableBody');
+        const ultimos = historial.slice(-6).reverse();
+        tbody.innerHTML = '';
+        ultimos.forEach(row => {
+          const tr = document.createElement('tr');
+          const tempText = row.temperatura !== null ? row.temperatura.toFixed(1) + ' °C' : '--';
+          const bpmText = row.bpm !== null ? Math.round(row.bpm) + ' BPM' : '--';
+          const spo2Text = row.spo2 !== null ? row.spo2.toFixed(1) + ' %' : '--';
+
+          let diag = 'Normal';
+          if (row.temperatura && row.temperatura > 37.5) diag = 'Alerta térmica';
+          if (row.spo2 && row.spo2 < 95.0) diag = 'Alerta O₂';
+
+          tr.innerHTML = `
+            <td>${row.hora || '--'}</td>
+            <td>${tempText}</td>
+            <td>${bpmText}</td>
+            <td>${spo2Text}</td>
+            <td><span style="color:${diag === 'Normal' ? 'var(--status-ok)' : 'var(--status-warn)'}; font-weight:600">${diag}</span></td>
+          `;
+          tbody.appendChild(tr);
+        });
+
+      } catch (err) {
+        console.error('Error al actualizar historial:', err);
+      }
+    }
+
+    // Polling Intervals
+    actualizarTelemetria();
+    actualizarHistorial();
+    setInterval(actualizarTelemetria, 1000);
+    setInterval(actualizarHistorial, 2500);
+  </script>
+</body>
+</html>
