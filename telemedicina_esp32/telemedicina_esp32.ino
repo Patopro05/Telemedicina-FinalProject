@@ -13,20 +13,18 @@
 
 #include <Wire.h>
 #include <WiFi.h>
+#include <WiFiClientSecure.h>
 #include <HTTPClient.h>
 
 // ============================================================================
-// 1. CONFIGURACION DE RED WI-FI Y SERVIDOR WEB
+// 1. CONFIGURACION DE RED WI-FI Y SERVIDOR WEB EN LA NUBE
 // ============================================================================
 // Credenciales Wi-Fi de Mariangeles:
 const char* ssid     = "INFINITUMD903_2.4";
 const char* password = "C77Xveqmet";
 
-// DIRECCION DEL SERVIDOR WEB
-// Pega aquí la URL que te dará Render al desplegar el proyecto.
-// Ejemplo en la nube: "https://telemedicina-finalproject.onrender.com/api/datos"
-// Ejemplo local de prueba: "http://192.168.1.64:5000/api/datos"
-const char* servidor = "https://tu-servicio-en-render.onrender.com/api/datos";
+// URL DEL SERVIDOR WEB EN RENDER (IMPORTANTE: Debe incluir la ruta /api/datos)
+const char* servidor = "https://telemedicina-healthmonitor.onrender.com/api/datos";
 
 // ============================================================================
 // 2. CONFIGURACION DEL SENSOR MAX30205 (TEMPERATURA CORPORAL)
@@ -82,7 +80,7 @@ void setup() {
   Serial.print(")");
 
   int reintentos = 0;
-  while (WiFi.status() != WL_CONNECTED && reintentos < 25) {
+  while (WiFi.status() != WL_CONNECTED && reintentos < 30) {
     delay(500);
     Serial.print(".");
     reintentos++;
@@ -91,7 +89,7 @@ void setup() {
   if (WiFi.status() == WL_CONNECTED) {
     Serial.println();
     Serial.println("WiFi conectado exitosamente!");
-    Serial.print("Direccion IP del ESP32: ");
+    Serial.print("Direccion IP local del ESP32: ");
     Serial.println(WiFi.localIP());
   } else {
     Serial.println();
@@ -142,19 +140,23 @@ void loop() {
     Serial.print(spo2, 1);
     Serial.println(" % (Normoxemia)");
 
-    // 4. TRANSMISION POR HTTP POST AL SERVIDOR WEB
+    // 4. TRANSMISION POR HTTPS POST AL SERVIDOR WEB (RENDER)
     if (WiFi.status() == WL_CONNECTED) {
-      // Construir payload JSON con las 3 mediciones
+      // Cliente seguro para HTTPS en Render
+      WiFiClientSecure client;
+      client.setInsecure(); // Acepta el certificado TLS de Render sin requerir CA bundle local
+
+      HTTPClient http;
+      http.begin(client, servidor);
+      http.addHeader("Content-Type", "application/json");
+      http.setTimeout(5000); // 5 segundos para tolerar latencia de red
+
+      // Construir payload JSON con comillas correctamente escapadas
       String json = "{";
       json += "\"temperatura\":" + String(temperatura, 2) + ",";
       json += "\"bpm\":" + String(bpm, 1) + ",";
       json += "\"spo2\":" + String(spo2, 1);
       json += "}";
-
-      HTTPClient http;
-      http.begin(servidor);
-      http.addHeader("Content-Type", "application/json");
-      http.setTimeout(4000);
 
       int respuesta = http.POST(json);
 
@@ -165,9 +167,11 @@ void loop() {
       Serial.println(respuesta);
 
       if (respuesta == 200) {
-        Serial.println("-> Datos guardados y mostrados en la pagina web en tiempo real.");
+        Serial.println("-> [EXITO] Datos guardados y mostrados en la pagina web en tiempo real.");
       } else {
-        Serial.println("-> Verifica que la URL del servidor web este activa y accesible.");
+        Serial.print("-> [AVISO] Codigo HTTP: ");
+        Serial.print(respuesta);
+        Serial.println(" (Verifica que la URL incluya /api/datos)");
       }
 
       http.end();
